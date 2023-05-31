@@ -1,7 +1,7 @@
 # Pengaduk-Nutrisi
 Run Website -> not available
 
-# Schematic (not final yet)
+# Schematic
 ![Wiring](https://github.com/NugrohoESBB/Pengaduk-Nutrisi/blob/main/SchematicPengadukNutrisi.png)
 
 # Documentation
