@@ -4,14 +4,14 @@
 #include <LiquidCrystal_I2C.h>
 
 // Component pins
-const int flowSensorPin = 10;
-const int waterLevelSensorPin = 8;
-const int solenoidValvePin = 9;
-const int relayV1Pin = 7;
-const int relayV2Pin = 6;
-const int relayV3Pin = 5;
-const int relayMPin = 4;
-const int ledPin = 3;
+const int flow1SensorPin = 2;
+const int flow2SensorPin = 3;
+const int relayV1Pin = 4;
+const int relayV2Pin = 5;
+const int relayPoPin = 7;
+const int relayMoPin = 6;
+const int waterLevelSensorPin = 9;
+const int ledPin = 13;
 
 // Configuration keypad
 const byte ROWS = 4;
@@ -31,22 +31,34 @@ Keypad_I2C keypad = Keypad_I2C(makeKeymap(keys), rowPins, colPins, ROWS, COLS, i
 LiquidCrystal_I2C lcd1(0x23, 20, 4);
 LiquidCrystal_I2C lcd2(0x26, 20, 4);
 
-// Input variable
+// Variable nutritional input
 float nutrisi1 = 0;
 float nutrisi2 = 0;
-float nutrisi3 = 0;
-float air = 0;
+
+// Variable flow sensors
+volatile long pulseFlow1;
+volatile long pulseFlow2;
+unsigned long lastTimeFlow1;
+unsigned long lastTimeFlow2;
+float volumeFlow1;
+float volumeFlow2;
 
 void setup() {
   // Input output initialization
-  pinMode(solenoidValvePin, OUTPUT);
   pinMode(relayV1Pin, OUTPUT);
   pinMode(relayV2Pin, OUTPUT);
-  pinMode(relayV3Pin, OUTPUT);
-  pinMode(relayMPin, OUTPUT);
-  pinMode(flowSensorPin, INPUT);
+  pinMode(relayPoPin, OUTPUT);
+  pinMode(relayMoPin, OUTPUT);
+  pinMode(flow1SensorPin, INPUT);
+  pinMode(flow2SensorPin, INPUT);
   pinMode(waterLevelSensorPin, INPUT);
   pinMode(ledPin, OUTPUT);
+
+  // Relay Low
+  digitalWrite(relayV1Pin, HIGH);
+  digitalWrite(relayV2Pin, HIGH);
+  digitalWrite(relayPoPin, HIGH);
+  digitalWrite(relayMoPin, HIGH);
   
   // LCD initialization
   lcd1.init();
@@ -57,9 +69,9 @@ void setup() {
   // Display LCD1
   lcd1.setCursor(0, 0);
   lcd1.print("====================");
-  lcd1.setCursor(3, 1);
+  lcd1.setCursor(2, 1);
   lcd1.print("Pengaduk Nutrisi");
-  lcd1.setCursor(4, 2);
+  lcd1.setCursor(3, 2);
   lcd1.print("Sistem Irigasi");
   lcd1.setCursor(0, 3);
   lcd1.print("====================");
@@ -69,9 +81,9 @@ void setup() {
   // Display LCD2
   lcd2.setCursor(0, 0);
   lcd2.print("====================");
-  lcd2.setCursor(3, 1);
+  lcd2.setCursor(2, 1);
   lcd2.print("Pengaduk Nutrisi");
-  lcd2.setCursor(4, 2);
+  lcd2.setCursor(3, 2);
   lcd2.print("Sistem Irigasi");
   lcd2.setCursor(0, 3);
   lcd2.print("====================");
@@ -80,19 +92,25 @@ void setup() {
 
   // Keypad initialization
   keypad.begin();
+
+  // Flow sensor initialization
+  attachInterrupt(digitalPinToInterrupt(flow1SensorPin), increase1, RISING);
+  attachInterrupt(digitalPinToInterrupt(flow2SensorPin), increase2, RISING);  
+
+  // Cek semua komponen
+  componentCheck();
+  delay(4000);
+  lcd1.clear();
 }
 
 void loop() {
-
   // Menu keypad
   lcd2.setCursor(0, 0);
-  lcd2.print("1 : Nilai Nutrisi A");
-  lcd2.setCursor(0, 1);
-  lcd2.print("2 : Nilai Nutrisi B");
+  lcd2.print("  Masukkan Pilihan  ");
   lcd2.setCursor(0, 2);
-  lcd2.print("3 : Nilai Nutrisi C");
+  lcd2.print("1 : Nilai Nutrisi A");
   lcd2.setCursor(0, 3);
-  lcd2.print("4 : Nilai Air");
+  lcd2.print("2 : Nilai Nutrisi B");
   
   char key = keypad.getKey();
 
@@ -105,17 +123,12 @@ void loop() {
         nutrisi2 = setValue();
         break;
       case '3':
-        nutrisi3 = setValue();
-        break;
-      case '4':
-        air = setValue();
+        turnOnPump();
         break;
       case 'A':
-        openSolenoidValve();
         turnOnAgitator();
         break;
       case 'B':
-        closeSolenoidValve();
         turnOffAgitator();
         break;
       case 'C':
@@ -127,83 +140,21 @@ void loop() {
     }
   }
 
-  // Cek semua komponen
-  componentCheck();
-}
+  // Flow 1 dan 2
+  lcd1.setCursor(4, 0);
+  lcd1.print("Sensor Value");
+  volFlow1();
+  volFlow2();
+  waterLevel();
 
-// Function untuk input nilai bilangan char
-/*
-float setValue() {
-  float value = 0;
-  lcd2.clear();
-  lcd2.setCursor(0, 1);
-  lcd2.print("Input Value :");
-  while(1) {
-    char key = keypad.getKey();
-    if (key != NO_KEY) {
-      if (key >= '0' && key <= '9') {
-        lcd2.setCursor(15, 1);
-        lcd2.print(key);
-        value = value * 10 + (key - '0');
-      } else if (key == '#') {
-        break;
-      }
-    }
+  if (volumeFlow1 >= 1000 and volumeFlow1 <= 5000) {
+    digitalWrite(relayV1Pin, HIGH);
+  } else if (volumeFlow2 >= 1000 and volumeFlow2 <= 5000) {
+    digitalWrite(relayV2Pin, HIGH);
   }
-  lcd2.clear();
-  return value;
 }
-*/
 
-// Function untuk input nilai bilangan float tetapi
-// nilai decimal didepan koma tampil 1 char bergantian
-/*
-float setValue() {
-  float value = 0;
-  float decimal = 0;
-  bool decimalFlag = false;
-  int decimalPlaces = 0;
-
-  lcd2.clear();
-  lcd2.setCursor(0, 1);
-  lcd2.print("Input Value :");
-
-  while (1) {
-    char key = keypad.getKey();
-
-    if (key != NO_KEY) {
-      if (key >= '0' && key <= '9') {
-        if (!decimalFlag) {
-          value = value * 10 + (key - '0');
-        } else {
-          decimalPlaces++;
-          decimal = decimal + ((key - '0') * pow(10, -decimalPlaces));
-        }
-        lcd2.setCursor(0 + decimalPlaces, 2);
-        lcd2.print(key);
-      } else if (key == '#') {
-        break;
-      } else if (key == '*') {
-        decimalFlag = true;
-        lcd2.setCursor(0, 2);
-        lcd2.print('.');
-      }
-    }
-  }
-
-  value += decimal;
-  lcd2.clear();
-  lcd2.setCursor(0, 0);
-  lcd2.print("Value: ");
-  lcd2.setCursor(0, 1);
-  lcd2.print(value);
-  delay(2000);
-  lcd2.clear();
-  
-  return value;
-}
-*/
-
+// =============== PR CODING ===============
 // Function untuk input nilai bilangan float tetapi
 // (lihat comment dibawah)
 float setValue() {
@@ -268,66 +219,112 @@ void componentCheck() {
   lcd1.setCursor(3, 0);
   lcd1.print("Component State");
   
-  int flowSensorValue = digitalRead(flowSensorPin);
+  int flow1SensorValue = digitalRead(flow1SensorPin);
+  int flow2SensorValue = digitalRead(flow2SensorPin);
   int waterLevelSensorValue = digitalRead(waterLevelSensorPin);
   
-  if (flowSensorValue == HIGH) {
-    lcd1.setCursor(0, 1);
-    lcd1.print("Flow Sensor: OK  ");
-    digitalWrite(ledPin, HIGH);
+  if (flow1SensorValue == HIGH and flow2SensorValue == HIGH) {
+  //if (flow1SensorValue == HIGH) {
+    lcd1.setCursor(0, 2);
+    lcd1.print("Flow Sen :OK ");
+    digitalWrite(ledPin, HIGH); 
   } else {
-    lcd1.setCursor(0, 1);
-    lcd1.print("Flow Sensor: LOW");
+    lcd1.setCursor(0, 2);
+    lcd1.print("Flow Sen :LOW ");
     digitalWrite(ledPin, LOW);
   }
   
   if (waterLevelSensorValue == HIGH) {
-    lcd1.setCursor(0, 2);
-    lcd1.print("Water Level: OK  ");
+    lcd1.setCursor(0, 3);
+    lcd1.print("Water Lev:OK ");
     digitalWrite(ledPin, HIGH);
   } else {
-    lcd1.setCursor(0, 2);
-    lcd1.print("Water Level: LOW ");
+    lcd1.setCursor(0, 3);
+    lcd1.print("Water Lev:LOW ");
     digitalWrite(ledPin, LOW);
   }
 }
 
-void openSolenoidValve() {
-  digitalWrite(solenoidValvePin, HIGH);
-  lcd2.clear();
-  lcd2.print("Solenoid Valve");
-  lcd2.setCursor(0, 1);
-  lcd2.print("Terbuka");
-  delay(1000);
+void volFlow1() {
+  volumeFlow1 = 2663 * pulseFlow1;
+  if (millis() - lastTimeFlow1 > 1000) {
+    pulseFlow1 = 0;
+    lastTimeFlow1 = millis();
+  }
+  lcd1.setCursor(0, 1);
+  lcd1.print("Flow 1: ");
+  lcd1.print(volumeFlow1);
+  lcd1.setCursor(16, 1);
+  lcd1.print("mL/s");
 }
 
-void closeSolenoidValve() {
-  digitalWrite(solenoidValvePin, LOW);
-  lcd2.clear();
-  lcd2.print("Solenoid Valve");
-  lcd2.setCursor(0, 1);
-  lcd2.print("Tertutup");
-  delay(1000);
+void volFlow2() {
+  volumeFlow2 = 2663 * pulseFlow2;
+  if (millis() - lastTimeFlow2 > 1000) {
+    pulseFlow2 = 0;
+    lastTimeFlow2 = millis();
+  }
+  lcd1.setCursor(0, 2);
+  lcd1.print("Flow 2: ");
+  lcd1.print(volumeFlow2);
+  lcd1.setCursor(16, 2);
+  lcd1.print("mL/s");
+}
+
+void increase1() {
+  pulseFlow1++;
+}
+
+void increase2() {
+  pulseFlow2++;
+}
+
+void waterLevel() {
+  int waterLevelSensorValue = digitalRead(waterLevelSensorPin);
+  
+  if (waterLevelSensorValue == HIGH) {
+    lcd1.setCursor(0, 3);
+    lcd1.print("Water : OK ");
+    digitalWrite(ledPin, HIGH);
+  } else {
+    lcd1.setCursor(0, 3);
+    lcd1.print("Water : LOW ");
+    digitalWrite(ledPin, LOW);
+  }
 }
 
 void turnOnAgitator() {
   digitalWrite(relayV1Pin, LOW);
   digitalWrite(relayV2Pin, LOW);
-  digitalWrite(relayV3Pin, LOW);
-  digitalWrite(relayMPin, LOW);
+  // digitalWrite(relayPoPin, LOW);
+  digitalWrite(relayMoPin, LOW);
   lcd2.clear();
-  lcd2.print("Pengaduk Aktif");
+  lcd2.print("Pengaduk Aktif dan");
+  lcd2.setCursor(0, 1);
+  lcd2.print("Solenoid Valve");
+  lcd2.setCursor(0, 2);
+  lcd2.print("Terbuka");
   delay(3000);
+  lcd2.clear();
 }
 
 void turnOffAgitator() {
   digitalWrite(relayV1Pin, HIGH);
   digitalWrite(relayV2Pin, HIGH);
-  digitalWrite(relayV3Pin, HIGH);
-  digitalWrite(relayMPin, HIGH);
+  digitalWrite(relayPoPin, HIGH);
+  digitalWrite(relayMoPin, HIGH);
   lcd2.clear();
-  lcd2.print("Pengaduk Mati");
+  lcd2.print("Pengaduk Mati dan");
+  lcd2.setCursor(0, 1);
+  lcd2.print("Solenoid Valve");
+  lcd2.setCursor(0, 2);
+  lcd2.print("Tetutup");
   delay(3000);
+  lcd2.clear();
+}
+
+void turnOnPump() {
+  digitalWrite(relayPoPin, LOW);
 }
 
 void showNutrientValues() {
@@ -338,22 +335,17 @@ void showNutrientValues() {
   lcd2.print("Nutrisi 2 : ");
   lcd2.print(nutrisi2);
   lcd2.setCursor(0, 2);
-  lcd2.print("Nutrisi 3 : ");
-  lcd2.print(nutrisi3);
-  lcd2.setCursor(0, 3);
-  lcd2.print("Air       : ");
-  lcd2.print(air);
   delay(5000);
+  lcd2.clear();
 }
 
 void resetNutrientValues() {
   nutrisi1 = 0;
   nutrisi2 = 0;
-  nutrisi3 = 0;
-  air = 0;
   lcd2.clear();
   lcd2.print("Nilai Nutrisi");
   lcd2.setCursor(0, 1);
-  lcd2.print("dan air direset");
+  lcd2.print("direset");
   delay(5000);
+  lcd2.clear();
 }
